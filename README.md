@@ -36,19 +36,6 @@ Features
 * Displaying image information in status bar via `image-info` & `thumb-info`
 * Customizable window title via `win-title`
 
-
-Screenshots
------------
-
-**Image mode with default colors:**
-
-![Image](https://codeberg.org/nsxiv/pages/raw/branch/master/img/image.png "Image mode")
-
-**Thumbnail mode with custom colors:**
-
-![Thumb](https://codeberg.org/nsxiv/pages/raw/branch/master/img/thumb.png "Thumb mode")
-
-
 Installing via package manager
 ------------------------------
 
