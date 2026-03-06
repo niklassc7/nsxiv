@@ -43,9 +43,12 @@ config.h:
 	cp config.def.h $@
 
 version.h: config.mk .git/index
-	@echo "GEN $@"
-	v="$$(git describe 2>/dev/null || true)"; \
-	echo "#define VERSION \"$${v:-$(VERSION)}\"" >$@
+	@v="$$(git describe 2>/dev/null || true)"; \
+	payload=$$(printf '#define VERSION "%s"' "$${v:-$(VERSION)}"); \
+	if ! printf '%s\n' "$$payload" | cmp -s - "$@" 2>/dev/null; then \
+		echo "GEN $@"; \
+		printf '%s\n' "$$payload" >"$@"; \
+	fi
 
 .git/index:
 

@@ -129,18 +129,8 @@ static int fncmp(const void *a, const void *b)
 
 static void check_add_file(const char *filename, bool given)
 {
-	char *path;
-
 	if (*filename == '\0')
 		return;
-
-	if (access(filename, R_OK) < 0 ||
-	    (path = realpath(filename, NULL)) == NULL)
-	{
-		if (given)
-			error(0, errno, "%s", filename);
-		return;
-	}
 
 	if (fileidx == filecnt) {
 		filecnt *= 2;
@@ -149,7 +139,7 @@ static void check_add_file(const char *filename, bool given)
 	}
 
 	files[fileidx].name = estrdup(filename);
-	files[fileidx].path = path;
+	files[fileidx].path = NULL;
 	if (given)
 		files[fileidx].flags |= FF_WARN;
 	fileidx++;
@@ -161,6 +151,11 @@ static void add_entry(const char *entry_name)
 	char *filename;
 	struct stat fstats;
 	r_dir_t dir;
+
+	if (options->assume_files) {
+		check_add_file(entry_name, true);
+		return;
+	}
 
 	if (stat(entry_name, &fstats) < 0) {
 		error(0, errno, "%s", entry_name);
@@ -174,7 +169,7 @@ static void add_entry(const char *entry_name)
 			return;
 		}
 		start = fileidx;
-		while ((filename = r_readdir(&dir, true)) != NULL) {
+		while ((filename = r_readdir(&dir, options->include_hidden)) != NULL) {
 			check_add_file(filename, false);
 			free(filename);
 		}
@@ -197,8 +192,7 @@ void remove_file(int n, bool manual)
 	if (files[n].flags & FF_MARK)
 		markcnt--;
 
-	if (files[n].path != files[n].name)
-		free((void *)files[n].path);
+	free((void *)files[n].path);
 	free((void *)files[n].name);
 	if (tns.thumbs != NULL)
 		tns_unload(&tns, n);
@@ -321,8 +315,9 @@ static void open_title(void)
 {
 	char *argv[8];
 	char w[12] = "", h[12] = "", z[12] = "", fidx[12], fcnt[12];
+	const char *filepath;
 
-	if (wintitle.f.err)
+	if (wintitle.f.err || (filepath = file_realpath(&files[fileidx])) == NULL)
 		return;
 
 	close_title();
@@ -333,7 +328,7 @@ static void open_title(void)
 	}
 	snprintf(fidx, ARRLEN(fidx), "%d", fileidx + 1);
 	snprintf(fcnt, ARRLEN(fcnt), "%d", filecnt);
-	construct_argv(argv, ARRLEN(argv), wintitle.f.cmd, files[fileidx].path,
+	construct_argv(argv, ARRLEN(argv), wintitle.f.cmd, filepath,
 	               fidx, fcnt, w, h, z, NULL);
 	wintitle.pid = spawn(&wintitle.fd, NULL, O_NONBLOCK, argv);
 }
@@ -348,8 +343,9 @@ void open_info(void)
 	char *argv[6], w[12] = "", h[12] = "";
 	char *cmd = mode == MODE_IMAGE ? info.f.cmd : info.ft.cmd;
 	bool ferr = mode == MODE_IMAGE ? info.f.err : info.ft.err;
+	const char *filepath = file_realpath(&files[fileidx]);
 
-	if (ferr || info.fd >= 0 || win.bar.h == 0)
+	if (ferr || info.fd >= 0 || win.bar.h == 0 || filepath == NULL)
 		return;
 	win.bar.l.buf[0] = '\0';
 	if (mode == MODE_IMAGE) {
@@ -357,7 +353,7 @@ void open_info(void)
 		snprintf(h, sizeof(h), "%d", img.h);
 	}
 	construct_argv(argv, ARRLEN(argv), cmd, files[fileidx].name, w, h,
-	               files[fileidx].path, NULL);
+	               filepath, NULL);
 	info.pid = spawn(&info.fd, NULL, O_NONBLOCK, argv);
 }
 
@@ -442,6 +438,7 @@ static void update_info(void)
 	unsigned int i, fn, fw;
 	const char *mark;
 	win_bar_t *l = &win.bar.l, *r = &win.bar.r;
+	const char *filepath, *cmp_path;
 
 	static struct {
 		const char *filepath;
@@ -450,8 +447,11 @@ static void update_info(void)
 		appmode_t mode;
 	} prev;
 
+	filepath = file_realpath(&files[fileidx]);
+	cmp_path = filepath != NULL ? filepath : files[fileidx].name;
+
 	if (prev.fileidx != fileidx || prev.mode != mode ||
-	    (prev.filepath == NULL || !STREQ(prev.filepath, files[fileidx].path)))
+	    (prev.filepath == NULL || !STREQ(prev.filepath, cmp_path)))
 	{
 		close_info();
 		open_info();
@@ -464,7 +464,7 @@ static void update_info(void)
 		return;
 
 	free((char *)prev.filepath);
-	prev.filepath = estrdup(files[fileidx].path);
+	prev.filepath = estrdup(cmp_path);
 	prev.fileidx = fileidx;
 	prev.zoom = img.zoom;
 	prev.mode = mode;
@@ -658,7 +658,11 @@ static bool run_key_handler(const char *key, unsigned int mask)
 	oldst = emalloc(fcnt * sizeof(*oldst));
 	for (f = i = 0; f < fcnt; i++) {
 		if ((marked && (files[i].flags & FF_MARK)) || (!marked && i == fileidx)) {
-			stat(files[i].path, &oldst[f]);
+			const char *filepath = file_realpath(&files[i]);
+			if (filepath == NULL)
+				filepath = files[i].name;
+			if (stat(filepath, &oldst[f]) != 0)
+				memset(&oldst[f], 0, sizeof(oldst[f]));
 			fprintf(pfs, "%s%c", files[i].name, options->using_null ? '\0' : '\n');
 			f++;
 		}
@@ -669,7 +673,10 @@ static bool run_key_handler(const char *key, unsigned int mask)
 
 	for (f = i = 0; f < fcnt; i++) {
 		if ((marked && (files[i].flags & FF_MARK)) || (!marked && i == fileidx)) {
-			if (stat(files[i].path, &st) != 0 ||
+			const char *filepath = file_realpath(&files[i]);
+			if (filepath == NULL)
+				filepath = files[i].name;
+			if (stat(filepath, &st) != 0 ||
 			    memcmp(&oldst[f].st_mtime, &st.st_mtime, sizeof(st.st_mtime)) != 0)
 			{
 				if (tns.thumbs != NULL) {
@@ -908,7 +915,8 @@ int main(int argc, char *argv[])
 	if (options->clean_cache) {
 		tns_init(&tns, NULL, NULL, NULL, NULL);
 		tns_clean_cache();
-		exit(EXIT_SUCCESS);
+		if (!options->update_cache)
+			exit(EXIT_SUCCESS);
 	}
 
 	if (options->filecnt == 0 && !options->from_stdin) {
@@ -941,21 +949,18 @@ int main(int argc, char *argv[])
 	filecnt = fileidx;
 	fileidx = options->startnum < filecnt ? options->startnum : 0;
 
-	if (options->background_cache && !options->private_mode) {
-		pid_t ppid = getpid(); /* to check if parent is still alive or not */
-		switch (fork()) {
-		case 0:
-			tns_init(&tns, files, &filecnt, &fileidx, NULL);
-			while (filecnt > 0 && getppid() == ppid) {
-				tns_load(&tns, filecnt - 1, false, true);
-				remove_file(filecnt - 1, true);
-			}
-			exit(0);
-			break;
-		case -1:
-			error(0, errno, "fork failed");
-			break;
+	if (options->update_cache) {
+		if (options->private_mode) {
+			error(0, 0, "private mode was enabled, not caching anything");
+			exit(EXIT_SUCCESS);
 		}
+		tns_free(&tns);
+		tns_init(&tns, files, &filecnt, &fileidx, NULL);
+		while (filecnt > 0) {
+			tns_load(&tns, filecnt - 1, false, true);
+			remove_file(filecnt - 1, true);
+		}
+		assert(0 && "unreachable");
 	}
 
 	win_init(&win);

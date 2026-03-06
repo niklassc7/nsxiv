@@ -31,6 +31,10 @@
 #include <Imlib2.h>
 #include <X11/Xlib.h>
 
+#if !defined(IMLIB2_VERSION) || IMLIB2_VERSION < 11100
+	#error "Imlib2 version too old, at least v1.11.0 required"
+#endif
+
 /*
  * Annotation for functions called in cleanup().
  * These functions are not allowed to call error(!0, ...) or exit().
@@ -102,9 +106,11 @@ typedef enum {
 
 typedef struct {
 	const char *name; /* as given by user */
-	const char *path; /* always absolute, result of realpath(3) */
+	const char *path; /* lazily resolved absolute path, generally should be accessed via file_realpath() */
 	fileflags_t flags;
 } fileinfo_t;
+
+const char *file_realpath(const fileinfo_t*);
 
 /* timeouts in milliseconds: */
 enum {
@@ -160,15 +166,6 @@ typedef keymap_t button_t;
 
 
 /* image.c */
-
-#ifdef IMLIB2_VERSION /* UPGRADE: Imlib2 v1.8.0: remove all HAVE_IMLIB2_MULTI_FRAME ifdefs */
-	#if IMLIB2_VERSION >= IMLIB2_VERSION_(1, 8, 0)
-		#define HAVE_IMLIB2_MULTI_FRAME 1
-	#endif
-#endif
-#ifndef HAVE_IMLIB2_MULTI_FRAME
-	#define HAVE_IMLIB2_MULTI_FRAME 0
-#endif
 
 typedef struct {
 	Imlib_Image im;
@@ -250,8 +247,10 @@ struct opt {
 	bool to_stdout;
 	bool using_null;
 	bool recursive;
+	bool include_hidden;
 	int filecnt;
 	int startnum;
+	bool assume_files;
 
 	/* image: */
 	scalemode_t scalemode;
@@ -276,8 +275,8 @@ struct opt {
 	bool quiet;
 	bool thumb_mode;
 	bool clean_cache;
+	bool update_cache;
 	bool private_mode;
-	bool background_cache;
 };
 
 extern const opt_t *options;

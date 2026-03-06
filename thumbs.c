@@ -129,9 +129,8 @@ static void tns_cache_write(tns_t *tns, Imlib_Image im, const char *filepath, bo
 			memcpy(cache_tmpfile_base, TMP_NAME, sizeof(TMP_NAME));
 			if ((tmpfd = mkstemp(cache_tmpfile)) < 0)
 				goto end;
-			close(tmpfd);
-			/* UPGRADE: Imlib2 v1.11.0: use imlib_save_image_fd() */
-			imlib_save_image_with_error_return(cache_tmpfile, &err);
+			imlib_save_image_fd(tmpfd, ""); /* NOTE: closes `tmpfd` */
+			err = imlib_get_error();
 			times.actime = fstats.st_atime;
 			times.modtime = fstats.st_mtime;
 			utime(cache_tmpfile, &times);
@@ -156,7 +155,7 @@ void tns_clean_cache(void)
 
 	dirlen = strlen(cache_dir);
 
-	while ((cfile = r_readdir(&dir, false)) != NULL) {
+	while ((cfile = r_readdir(&dir, true)) != NULL) {
 		filename = cfile + dirlen;
 		if (access(filename, F_OK) < 0) {
 			if (unlink(cfile) < 0)
@@ -288,11 +287,12 @@ bool tns_load(tns_t *tns, int n, bool force, bool cache_only)
 	thumb_t *t;
 	fileinfo_t *file;
 	Imlib_Image im = NULL;
+	const char *filepath;
 
 	if (n < 0 || n >= *tns->cnt)
 		return false;
 	file = &tns->files[n];
-	if (file->name == NULL || file->path == NULL)
+	if (file->name == NULL || (filepath = file_realpath(file)) == NULL)
 		return false;
 
 	t = &tns->thumbs[n];
@@ -300,12 +300,12 @@ bool tns_load(tns_t *tns, int n, bool force, bool cache_only)
 	t->im = NULL;
 
 	if (!force) {
-		if ((im = tns_cache_load(file->path, &force)) != NULL) {
+		if ((im = tns_cache_load(filepath, &force)) != NULL) {
 			imlib_context_set_image(im);
 			if (imlib_image_get_width() < maxwh &&
 			    imlib_image_get_height() < maxwh)
 			{
-				if ((cfile = tns_cache_filepath(file->path)) != NULL) {
+				if ((cfile = tns_cache_filepath(filepath)) != NULL) {
 					unlink(cfile);
 					free(cfile);
 				}
@@ -317,25 +317,17 @@ bool tns_load(tns_t *tns, int n, bool force, bool cache_only)
 #if HAVE_LIBEXIF
 		} else if (!force && !options->private_mode) {
 			int pw = 0, ph = 0, w, h, x = 0, y = 0;
-			bool err;
 			float zw, zh;
 			ExifData *ed;
 			ExifEntry *entry;
 			ExifContent *ifd;
 			ExifByteOrder byte_order;
-			int tmpfd;
-			char tmppath[] = "/tmp/nsxiv-XXXXXX";
 			Imlib_Image tmpim;
 
-			/* UPGRADE: Imlib2 v1.10.0: avoid tempfile and use imlib_load_image_mem() */
-			if ((ed = exif_data_new_from_file(file->path)) != NULL) {
-				if (ed->data != NULL && ed->size > 0 &&
-				    (tmpfd = mkstemp(tmppath)) >= 0)
-				{
-					err = write(tmpfd, ed->data, ed->size) != ed->size;
-					close(tmpfd);
-
-					if (!err && (tmpim = imlib_load_image(tmppath)) != NULL) {
+			if ((ed = exif_data_new_from_file(filepath)) != NULL) {
+				if (ed->data != NULL && ed->size > 0) {
+					tmpim = imlib_load_image_mem("", ed->data, ed->size);
+					if (tmpim != NULL) {
 						byte_order = exif_data_get_byte_order(ed);
 						ifd = ed->ifd[EXIF_IFD_EXIF];
 						entry = exif_content_get_entry(ifd, EXIF_TAG_PIXEL_X_DIMENSION);
@@ -368,7 +360,6 @@ bool tns_load(tns_t *tns, int n, bool force, bool cache_only)
 						}
 						imlib_free_image_and_decache();
 					}
-					unlink(tmppath);
 				}
 				exif_data_unref(ed);
 			}
@@ -389,7 +380,7 @@ bool tns_load(tns_t *tns, int n, bool force, bool cache_only)
 		im = tns_scale_down(im, maxwh);
 		imlib_context_set_image(im);
 		if (imlib_image_get_width() == maxwh || imlib_image_get_height() == maxwh)
-			tns_cache_write(tns, im, file->path, true);
+			tns_cache_write(tns, im, filepath, true);
 	}
 
 	if (cache_only) {
@@ -633,8 +624,10 @@ bool tns_zoom(tns_t *tns, int d)
 int tns_translate(tns_t *tns, int x, int y)
 {
 	int n;
+	int x_max = tns->x + tns->dim * tns->cols;
+	int y_max = tns->y + tns->dim * tns->rows;
 
-	if (x < tns->x || y < tns->y)
+	if (x < tns->x || y < tns->y || x > x_max || y > y_max)
 		return -1;
 
 	n = tns->first + (y - tns->y) / tns->dim * tns->cols +

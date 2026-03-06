@@ -3,7 +3,7 @@
 nsxiv \- Neo Simple X Image Viewer
 .SH SYNOPSIS
 .B nsxiv
-.RB [ \-abcfhiopqrtvZ0 ]
+.RB [ \-abcfHhiopqrtvZ0 ]
 .RB [ \-A
 .IR FRAMERATE ]
 .RB [ \-e
@@ -70,14 +70,19 @@ Set image gamma to GAMMA (\-32..32).
 Set window position and size. See section GEOMETRY SPECIFICATIONS of X(7) for
 more information on GEOMETRY argument.
 .TP
+.BR "\-H, \-\-hidden" [=no]
+Include hidden files and directories.
+The long option accepts an optional "no" to disable it.
+.TP
 .B "\-h, \-\-help"
 Print brief usage information to standard output and exit.
 .TP
 .B "\-i, \-\-stdin"
 Read names of files to open from standard input. Also done if FILE is `-'.
 .TP
-.BI "\-N, \-\-class " NAME
-Set the resource name (WM_CLASS) of nsxiv's X window to NAME.
+.BI "\-N, \-\-name " NAME
+Set the window name (i.e the "Instance" name of WM_CLASS as described in ICCCM)
+to NAME.
 .TP
 .BI "\-n, \-\-start\-at " NUM
 Start at picture number NUM.
@@ -134,6 +139,11 @@ Enables checkerboard background for alpha layer, when given
 .I no
 as an argument, disables it instead.
 .TP
+.B "\-\-assume\-files"
+Skip directory traversal, intended to be used when the list is known to contain
+only files. This avoids some initial disk operations and may reduce startup
+time on slow disks.
+.TP
 .BI "\-\-cache\-allow, \-\-cache\-deny " "CACHE\-PATHS"
 List of directories to whitelist or blacklist for thumbnail caching.
 See
@@ -141,6 +151,11 @@ See
 section for more information on the argument format.
 These options are mutually exclusive, if they are specified more than once then
 only the final one takes effect.
+.TP
+.BI "\-\-update\-cache"
+Update the thumbnail cache (creating them if necessary) of the given arguments
+and exit. Can be used along with
+.BR "\-\-clean\-cache" .
 .SH KEYBOARD COMMANDS
 .SS General
 The following keyboard commands are available in both image and thumbnail modes:
